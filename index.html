@@ -2809,7 +2809,17 @@ async function createCollege(name, id) {
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    return { ok: false, message: data.error || "Could not create college." };
+    if (response.status === 409) {
+      return {
+        ok: false,
+        message: data.error || "A college is already registered on the server. Use College Login with that College ID."
+      };
+    }
+
+    return {
+      ok: false,
+      message: data.error || `Could not create college (HTTP ${response.status}).`
+    };
   }
 
   // Cache ONLY the id + name locally (no role IDs!)
@@ -2824,9 +2834,59 @@ async function createCollege(name, id) {
 
   return { ok: true, college: collegeRegistry[collegeId] };
 }
+
+async function loginCollege(name, id) {
+  const collegeName = String(name || "").trim();
+  const collegeId = normalizeCollegeId(id);
+
+  if (collegeName.length < 2) {
+    return { ok: false, message: "Enter the registered college name." };
+  }
+
+  if (!validCollegeIdFormat(collegeId)) {
+    return { ok: false, message: "Enter a valid College ID." };
+  }
+
+  let response;
+  try {
+    response = await fetch(`${API_BASE}/api/colleges/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: collegeName, collegeId })
+    });
+  } catch {
+    return { ok: false, message: "Cannot reach the server. Is your backend running?" };
+  }
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    return {
+      ok: false,
+      message: data.error || `College login failed (HTTP ${response.status}).`
+    };
+  }
+
+  const college = data.college;
+
+  if (!college?.id || !college?.name) {
+    return { ok: false, message: "Server returned an invalid college record." };
+  }
+
+  collegeRegistry[college.id] = {
+    id: college.id,
+    name: college.name,
+    createdAt: collegeRegistry[college.id]?.createdAt || Date.now()
+  };
+
+  saveCollegeRegistry();
+  setActiveCollege(college.id);
+
+  return { ok: true, college: collegeRegistry[college.id] };
+}
 /* ------------------------------------------------------------
    5 · BOOTSTRAP DATA
-   ------------------------------------------------------------ */
+   ------------------------------------------------------------
 loadCollegeRegistry();
 
 tickets              = loadJSON(STORAGE_KEYS.tickets, []);
@@ -3210,8 +3270,8 @@ function setCollegeAuthMode(mode) {
 
   if (intro) {
     intro.textContent = collegeAuthMode === "create"
-      ? "Create the college workspace once. This FixPoint installation stays locked to that College ID and keeps its data separate from every other college."
-      : "Enter the registered college name and College ID to unlock the role-selection screen for this college.";
+      ? "Create the college workspace once. The registered college is stored on the FixPoint server and protected by its College ID."
+      : "Enter the registered college name and College ID. You can log in from any device using the server-registered college.";
   }
 
   if (statusTitle) {
@@ -3220,8 +3280,8 @@ function setCollegeAuthMode(mode) {
 
   if (statusText) {
     statusText.textContent = collegeAuthMode === "create"
-      ? "Create one college workspace on this device. After that, use College Login to enter the role-selection screen."
-      : "Only the registered College ID can continue. No other college can be selected on this installation.";
+      ? "Create the college workspace once. After it is created, use College Login to enter from this or another device."
+      : "The server checks the registered College ID and college name before allowing you to continue.";
   }
 }
 
@@ -3237,7 +3297,9 @@ function showCollegeSetup(mode = "create") {
   const createBtn = $("#collegeModeCreateBtn");
   if (createBtn) createBtn.disabled = hasCollege;
 
-  setCollegeAuthMode(hasCollege ? "login" : mode);
+  // A fresh device can still choose College Login and validate the college
+  // directly against the backend database.
+  setCollegeAuthMode(mode);
 }
 
 function showRoleSelection() {
@@ -3317,27 +3379,17 @@ function renderAuthScreen() {
   $("#appShell")?.classList.add("locked");
   $("#sideNav")?.classList.add("locked");
 
-  if (!activeCollegeId || !getActiveCollege()) {
-    setupCard?.classList.remove("hidden");
-    roleCard?.classList.add("hidden");
-    loginCard?.classList.add("hidden");
-    loginRole = null;
-
-    const createBtn = $("#collegeModeCreateBtn");
-    if (createBtn) createBtn.disabled = false;
-    setCollegeAuthMode("create");
-    return;
-  }
-
   setupCard?.classList.remove("hidden");
   roleCard?.classList.add("hidden");
   loginCard?.classList.add("hidden");
   loginRole = null;
 
+  const hasCollege = Boolean(activeCollegeId && getActiveCollege());
   const createBtn = $("#collegeModeCreateBtn");
-  if (createBtn) createBtn.disabled = true;
+  if (createBtn) createBtn.disabled = hasCollege;
 
-  setCollegeAuthMode("login");
+  // Preserve a local college as a convenience, but do not require it.
+  setCollegeAuthMode(hasCollege ? "login" : "create");
 
   const loginName = $("#collegeLoginName");
   if (loginName) loginName.value = getActiveCollege()?.name || "";
@@ -3485,15 +3537,10 @@ $("#collegeModeCreateBtn")?.addEventListener("click", () => {
 });
 
 $("#collegeModeLoginBtn")?.addEventListener("click", () => {
-  if (!activeCollegeId || !getActiveCollege()) {
-    toast("Create the college workspace first.");
-    setCollegeAuthMode("create");
-    return;
-  }
   setCollegeAuthMode("login");
 });
 
-$("#collegeSetupForm")?.addEventListener("submit", (event) => {
+$("#collegeSetupForm")?.addEventListener("submit", async (event) => {
   event.preventDefault();
 
   const name = $("#collegeNameInput").value.trim();
@@ -3505,8 +3552,7 @@ $("#collegeSetupForm")?.addEventListener("submit", (event) => {
     return;
   }
 
-  const result = createCollege(name, collegeId);
-
+const result = await createCollege(name, collegeId);
   if (!result.ok) {
     toast(escapeHTML(result.message));
     return;
@@ -3519,36 +3565,28 @@ $("#collegeSetupForm")?.addEventListener("submit", (event) => {
   toast(`College <strong>${escapeHTML(result.college.name)}</strong> created. Select your role to continue.`);
 });
 
-$("#collegeLoginForm")?.addEventListener("submit", (event) => {
+$("#collegeLoginForm")?.addEventListener("submit", async (event) => {
   event.preventDefault();
 
-  const college = getActiveCollege();
   const name = $("#collegeLoginName").value.trim();
   const collegeId = normalizeCollegeId($("#collegeLoginId").value);
-
-  if (!college) {
-    toast("No college workspace has been created on this device yet.");
-    setCollegeAuthMode("create");
-    return;
-  }
 
   if (!name || !collegeId) {
     toast("Enter the registered college name and College ID.");
     return;
   }
 
-  if (collegeId !== activeCollegeId) {
-    toast("That College ID does not belong to this FixPoint installation.");
-    return;
-  }
+  const result = await loginCollege(name, collegeId);
 
-  if (name.toLowerCase() !== String(college.name || "").trim().toLowerCase()) {
-    toast("The entered college name does not match the registered college.");
+  if (!result.ok) {
+    toast(escapeHTML(result.message));
     return;
   }
 
   showRoleSelection();
-  toast(`<strong>${escapeHTML(college.name)}</strong> verified. Choose your role.`);
+  renderAll();
+
+  toast(`<strong>${escapeHTML(result.college.name)}</strong> verified. Choose your role.`);
 });
 
 $("#roleGrid")?.addEventListener("click", (event) => {
