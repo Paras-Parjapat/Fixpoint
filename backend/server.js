@@ -198,6 +198,50 @@ app.post('/api/auth/admin-token', async (req, res) => {
   }
 });
 
+// --- ROLE TOKEN (issues a JWT for any role after verifying the access ID) ---
+app.post('/api/auth/role-token', async (req, res) => {
+  try {
+    const { collegeId, role, roleAccessId, phone, name } = req.body || {};
+    const id = String(collegeId || "").toUpperCase();
+
+    if (!id || !role || !roleAccessId || !phone) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    const { rows } = await pool.query(
+      "SELECT role_access_ids FROM colleges WHERE id = $1",
+      [id]
+    );
+    if (!rows[0]) return res.status(404).json({ error: "College not found" });
+
+    const hash = rows[0].role_access_ids?.[role];
+    if (!hash) return res.status(400).json({ error: "Role not configured" });
+
+    const ok = await bcrypt.compare(
+      String(roleAccessId).trim().toUpperCase(),
+      hash
+    );
+    if (!ok) return res.status(401).json({ error: "Invalid role access ID" });
+
+    const token = jwt.sign(
+      {
+        id: `${role}:${phone}`,
+        role,
+        collegeId: id,
+        phone,
+        name: name || "User"
+      },
+      JWT_SECRET,
+      { expiresIn: "30d" }
+    );
+
+    res.json({ token });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Could not issue token" });
+  }
+});
+
 /* ------------------------------------------------------------
    UPDATE ROLE IDS (admin only)
    ------------------------------------------------------------ */
@@ -375,17 +419,419 @@ app.post('/api/lectures', requireAuth, async (req, res) => {
 });
 
 /* ------------------------------------------------------------
+   TICKETS — control + worker actions
+   ------------------------------------------------------------ */
+app.patch('/api/tickets/:id/forward', requireAuth, async (req, res) => {
+  try {
+    if (req.user.role !== "control") {
+      return res.status(403).json({ error: "Only Control can forward" });
+    }
+    const { rows } = await pool.query(
+      `UPDATE tickets
+          SET forwarded = TRUE, forwarded_at = NOW(), status = 'forwarded'
+        WHERE short_id = $1 AND college_id = $2 AND status = 'pending'
+        RETURNING *`,
+      [req.params.id, req.user.collegeId]
+    );
+    if (!rows[0]) return res.status(404).json({ error: "Not found or already forwarded" });
+    res.json({ ticket: rows[0] });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Could not forward" });
+  }
+});
+
+app.post('/api/tickets/:id/fix', requireAuth, async (req, res) => {
+  try {
+    if (req.user.role !== "worker") {
+      return res.status(403).json({ error: "Only workers can mark fixed" });
+    }
+    const { fixImage } = req.body || {};
+    if (!fixImage) return res.status(400).json({ error: "fixImage required" });
+
+    const { rows } = await pool.query(
+      `UPDATE tickets
+          SET fix_image = $1, fixed_at = NOW(), status = 'fixed'
+        WHERE short_id = $2 AND college_id = $3 AND forwarded = TRUE
+        RETURNING *`,
+      [fixImage, req.params.id, req.user.collegeId]
+    );
+    if (!rows[0]) return res.status(404).json({ error: "Not found or not forwarded" });
+    res.json({ ticket: rows[0] });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Could not mark fixed" });
+  }
+});
+
+/* ------------------------------------------------------------
+   LECTURES — attendance
+   ------------------------------------------------------------ */
+app.patch('/api/lectures/:id/attendance', requireAuth, async (req, res) => {
+  try {
+    const { attendance } = req.body || {};
+    if (!["attend", "not-attend"].includes(attendance)) {
+      return res.status(400).json({ error: "attendance must be 'attend' or 'not-attend'" });
+    }
+
+    const where = ["id = $1", "college_id = $2"];
+    const params = [req.params.id, req.user.collegeId];
+
+    if (req.user.role === "professor") {
+      params.push(req.user.id);
+      where.push(`professor_id = $${params.length}`);
+    }
+
+    const { rows } = await pool.query(
+      `UPDATE lectures
+          SET attendance = $3, attendance_at = NOW()
+        WHERE ${where.join(" AND ")}
+        RETURNING *`,
+      [...params.slice(0, 2), attendance, ...params.slice(2)]
+    );
+    if (!rows[0]) return res.status(404).json({ error: "Not found or not yours" });
+    res.json({ lecture: rows[0] });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Could not update attendance" });
+  }
+});
+
+/* ------------------------------------------------------------
+   ACCOUNTS — admin + directory
+   ------------------------------------------------------------ */
+app.get('/api/accounts', requireAuth, async (req, res) => {
+  try {
+    if (req.user.role !== "principal") {
+      return res.status(403).json({ error: "Admin only" });
+    }
+    const { rows } = await pool.query(
+      `SELECT id, role, name, father_name, phone, branch, year,
+              department, designation, created_at
+         FROM accounts
+        WHERE college_id = $1 AND deleted_at IS NULL
+        ORDER BY name`,
+      [req.user.collegeId]
+    );
+    res.json({ accounts: rows });
+  } catch (err) {
+    res.status(500).json({ error: "Could not load accounts" });
+  }
+});
+
+app.get('/api/accounts/directory/students', requireAuth, async (req, res) => {
+  try {
+    if (!["student", "professor", "principal"].includes(req.user.role)) {
+      return res.status(403).json({ error: "Not allowed" });
+    }
+    const { rows } = await pool.query(
+      `SELECT a.id, a.name, a.father_name, a.branch, a.year, a.phone,
+              p.title, p.bio, p.line
+         FROM accounts a
+         LEFT JOIN student_profiles p
+           ON p.account_id = a.id AND p.college_id = a.college_id
+        WHERE a.college_id = $1
+          AND a.role = 'student'
+          AND a.deleted_at IS NULL
+        ORDER BY a.name`,
+      [req.user.collegeId]
+    );
+    res.json({ students: rows });
+  } catch (err) {
+    res.status(500).json({ error: "Could not load students" });
+  }
+});
+
+app.get('/api/accounts/directory/faculty', requireAuth, async (req, res) => {
+  try {
+    if (!["professor", "principal"].includes(req.user.role)) {
+      return res.status(403).json({ error: "Not allowed" });
+    }
+    const { rows } = await pool.query(
+      `SELECT id, name, phone, designation, department, branch
+         FROM accounts
+        WHERE college_id = $1
+          AND role = 'professor'
+          AND deleted_at IS NULL
+        ORDER BY name`,
+      [req.user.collegeId]
+    );
+    res.json({ faculty: rows });
+  } catch (err) {
+    res.status(500).json({ error: "Could not load faculty" });
+  }
+});
+
+app.post('/api/accounts', requireAuth, async (req, res) => {
+  try {
+    if (req.user.role !== "principal") {
+      return res.status(403).json({ error: "Admin only" });
+    }
+    const b = req.body || {};
+    if (!b.role || !b.name || !b.phone) {
+      return res.status(400).json({ error: "Role, name and phone required" });
+    }
+    const phone = String(b.phone).replace(/\D/g, "");
+
+    const { rows } = await pool.query(
+      `INSERT INTO accounts (college_id, role, name, father_name, phone, branch, year, department, designation)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [req.user.collegeId, b.role, b.name, b.fatherName || "", phone,
+       b.branch || "", b.year || "", b.department || "", b.designation || ""]
+    );
+
+    if (b.role === "student") {
+      await pool.query(
+        `INSERT INTO student_profiles (college_id, account_id, name, father_name, title, branch, year, bio, line)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [req.user.collegeId, rows[0].id, b.name, b.fatherName || "",
+         "B.Tech Student", b.branch || "IT", b.year || "Year 1",
+         "No bio added yet.", "Keep learning. Keep building."]
+      );
+    }
+
+    res.status(201).json({ account: rows[0] });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Could not add account" });
+  }
+});
+
+app.patch('/api/accounts/:id', requireAuth, async (req, res) => {
+  try {
+    if (req.user.role !== "principal") {
+      return res.status(403).json({ error: "Admin only" });
+    }
+    const b = req.body || {};
+    const phone = String(b.phone || "").replace(/\D/g, "");
+
+    const { rows } = await pool.query(
+      `UPDATE accounts
+          SET name=$1, father_name=$2, phone=$3, branch=$4, year=$5,
+              department=$6, designation=$7
+        WHERE id=$8 AND college_id=$9
+        RETURNING *`,
+      [b.name, b.fatherName || "", phone, b.branch || "", b.year || "",
+       b.department || "", b.designation || "", req.params.id, req.user.collegeId]
+    );
+    if (!rows[0]) return res.status(404).json({ error: "Not found" });
+    res.json({ account: rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: "Could not update account" });
+  }
+});
+
+app.delete('/api/accounts/:id', requireAuth, async (req, res) => {
+  try {
+    if (req.user.role !== "principal") {
+      return res.status(403).json({ error: "Admin only" });
+    }
+    await pool.query(
+      "UPDATE accounts SET deleted_at = NOW() WHERE id = $1 AND college_id = $2",
+      [req.params.id, req.user.collegeId]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: "Could not delete" });
+  }
+});
+
+/* ------------------------------------------------------------
+   PROFILES — own student profile
+   ------------------------------------------------------------ */
+app.get('/api/profiles/me', requireAuth, async (req, res) => {
+  try {
+    if (req.user.role !== "student") {
+      return res.status(403).json({ error: "Student only" });
+    }
+    const { rows } = await pool.query(
+      "SELECT * FROM student_profiles WHERE account_id = $1 AND college_id = $2",
+      [req.user.id, req.user.collegeId]
+    );
+    res.json({ profile: rows[0] || null });
+  } catch (err) {
+    res.status(500).json({ error: "Could not load profile" });
+  }
+});
+
+app.put('/api/profiles/me', requireAuth, async (req, res) => {
+  try {
+    if (req.user.role !== "student") {
+      return res.status(403).json({ error: "Student only" });
+    }
+    const b = req.body || {};
+
+    const { rows } = await pool.query(
+      `INSERT INTO student_profiles
+         (college_id, account_id, name, father_name, title, branch, year, bio, line)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+       ON CONFLICT (college_id, account_id)
+       DO UPDATE SET
+         name=$3, father_name=$4, title=$5, branch=$6, year=$7,
+         bio=$8, line=$9, updated_at=NOW()
+       RETURNING *`,
+      [req.user.collegeId, req.user.id, b.name, b.fatherName || "",
+       b.title || "B.Tech Student", b.branch || "IT", b.year || "Year 1",
+       b.bio || "No bio added yet.", b.line || "Keep learning. Keep building."]
+    );
+    res.json({ profile: rows[0] });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Could not save profile" });
+  }
+});
+
+/* ------------------------------------------------------------
+   PYQ — Past Year Question Papers
+   ------------------------------------------------------------ */
+const PYQ_MAX_SIZE = 4 * 1024 * 1024; // 4 MB
+
+// List PYQs (metadata only) — any logged-in role can view
+app.get('/api/pyqs', requireAuth, async (req, res) => {
+  try {
+    const { collegeId } = req.user;
+    const { branch, year, semester } = req.query;
+
+    const where = ["college_id = $1"];
+    const params = [collegeId];
+
+    if (branch)   { params.push(branch);        where.push(`branch = $${params.length}`); }
+    if (year)     { params.push(Number(year));  where.push(`year = $${params.length}`); }
+    if (semester) { params.push(semester);      where.push(`semester = $${params.length}`); }
+
+    const { rows } = await pool.query(
+      `SELECT id, title, subject, branch, year, semester, description,
+              file_name, file_size, uploaded_by_name, uploaded_by_role,
+              uploaded_by_phone, created_at
+         FROM pyqs
+        WHERE ${where.join(" AND ")}
+        ORDER BY created_at DESC`,
+      params
+    );
+
+    res.json({ pyqs: rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Could not load PYQs" });
+  }
+});
+
+// Get the file_data for a single PYQ — any logged-in role
+app.get('/api/pyqs/:id', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      "SELECT file_data, file_name FROM pyqs WHERE id = $1 AND college_id = $2",
+      [req.params.id, req.user.collegeId]
+    );
+    if (!rows[0]) return res.status(404).json({ error: "Not found" });
+
+    res.json({ file_data: rows[0].file_data, file_name: rows[0].file_name });
+  } catch (err) {
+    res.status(500).json({ error: "Could not fetch file" });
+  }
+});
+
+// Upload a PYQ — professor / control / principal only
+app.post('/api/pyqs', requireAuth, async (req, res) => {
+  try {
+    if (!["professor", "control", "principal"].includes(req.user.role)) {
+      return res.status(403).json({ error: "Only faculty can upload PYQs" });
+    }
+
+    const b = req.body || {};
+
+    if (!b.title || !b.branch || !b.year || !b.fileData || !b.fileName) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    // Base64 length * 0.75 ≈ raw byte size
+    const approxSize = Math.round(String(b.fileData).length * 0.75);
+
+    if (approxSize > PYQ_MAX_SIZE) {
+      return res.status(413).json({ error: "PDF too large (max 4 MB)" });
+    }
+
+    const { rows } = await pool.query(
+      `INSERT INTO pyqs
+         (college_id, title, subject, branch, year, semester, description,
+          file_data, file_name, file_size,
+          uploaded_by_phone, uploaded_by_name, uploaded_by_role)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+       RETURNING id, title, subject, branch, year, semester, description,
+                 file_name, file_size, uploaded_by_name, uploaded_by_role,
+                 uploaded_by_phone, created_at`,
+      [
+        req.user.collegeId,
+        b.title,
+        b.subject || "",
+        b.branch,
+        Number(b.year),
+        b.semester || "",
+        b.description || "",
+        b.fileData,
+        b.fileName,
+        approxSize,
+        req.user.phone || "",
+        req.user.name || "",
+        req.user.role
+      ]
+    );
+
+    res.status(201).json({ pyq: rows[0] });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Could not save PYQ" });
+  }
+});
+
+// Delete a PYQ — uploader or admin only
+app.delete('/api/pyqs/:id', requireAuth, async (req, res) => {
+  try {
+    if (!["professor", "control", "principal"].includes(req.user.role)) {
+      return res.status(403).json({ error: "Not allowed" });
+    }
+
+    const { rows } = await pool.query(
+      "SELECT uploaded_by_phone FROM pyqs WHERE id = $1 AND college_id = $2",
+      [req.params.id, req.user.collegeId]
+    );
+    if (!rows[0]) return res.status(404).json({ error: "Not found" });
+
+    const canDelete =
+      req.user.role === "principal" ||
+      rows[0].uploaded_by_phone === (req.user.phone || "");
+
+    if (!canDelete) {
+      return res.status(403).json({ error: "You can only delete your own uploads" });
+    }
+
+    await pool.query("DELETE FROM pyqs WHERE id = $1", [req.params.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: "Could not delete" });
+  }
+});
+
+/* ------------------------------------------------------------
    START
    ------------------------------------------------------------ */
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
   console.log(`🚀 FixPoint API running on http://localhost:${PORT}`);
   console.log(`   Endpoints loaded:`);
-  console.log(`   POST /api/colleges`);
-  console.log(`   POST /api/colleges/login`);
-  console.log(`   POST /api/auth/verify-role`);
-  console.log(`   POST /api/auth/admin-token`);
-  console.log(`   PATCH /api/colleges/me/role-ids`);
-  console.log(`   POST /api/auth/signup`);
-  console.log(`   POST /api/auth/login`);
+  console.log(`   POST   /api/colleges`);
+  console.log(`   POST   /api/colleges/login`);
+  console.log(`   PATCH  /api/colleges/me/role-ids`);
+  console.log(`   POST   /api/auth/verify-role`);
+  console.log(`   POST   /api/auth/admin-token`);
+  console.log(`   POST   /api/auth/role-token`);
+  console.log(`   POST   /api/auth/signup`);
+  console.log(`   POST   /api/auth/login`);
+  console.log(`   GET    /api/tickets`);
+  console.log(`   POST   /api/tickets`);
+  console.log(`   GET    /api/lectures`);
+  console.log(`   POST   /api/lectures`);
+  console.log(`   GET    /api/pyqs`);
+  console.log(`   POST   /api/pyqs`);
+  console.log(`   DELETE /api/pyqs/:id`);
 });

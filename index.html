@@ -1331,6 +1331,83 @@ tbody tr:hover td{background:#FBFCFE;}
 body[data-role="professor"] #membersPage,
 body[data-role="control"] #membersPage,
 body[data-role="worker"] #membersPage{display:none !important;}
+
+/* ============================================================
+   PYQ LIBRARY
+   ============================================================ */
+.pyq-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(280px,1fr));
+  gap:14px;
+}
+.pyq-card{
+  position:relative;
+  padding:16px;
+  border-radius:var(--r-lg);
+  background:var(--surface);
+  border:1px solid var(--line);
+  box-shadow:var(--sh-sm);
+  transition:.2s var(--ease);
+  overflow:hidden;
+}
+.pyq-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--cyan);}
+.pyq-card:hover{transform:translateY(-3px);box-shadow:var(--sh-md);}
+.pyq-card-head{display:flex;align-items:flex-start;gap:10px;margin-bottom:10px;}
+.pyq-icon{
+  width:38px;height:38px;flex:none;display:grid;place-items:center;
+  border-radius:10px;background:var(--cyan-soft);color:#0E7490;
+  font-size:18px;
+}
+.pyq-card h3{
+  font-size:14.5px;line-height:1.35;overflow-wrap:anywhere;
+  margin:0;
+}
+.pyq-card h3 + small{display:block;margin-top:4px;color:var(--muted);font-size:11px;}
+.pyq-meta{
+  display:flex;flex-wrap:wrap;gap:6px;margin:10px 0;
+}
+.pyq-tag{
+  padding:3px 8px;border-radius:var(--r-full);
+  background:var(--canvas-2);color:var(--ink-2);
+  font:700 9px var(--f-mono);letter-spacing:.05em;text-transform:uppercase;
+}
+.pyq-desc{
+  color:var(--muted);font-size:12px;line-height:1.5;
+  margin:8px 0;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+  overflow:hidden;
+}
+.pyq-foot{
+  display:flex;align-items:center;gap:8px;
+  margin-top:12px;padding-top:12px;
+  border-top:1px dashed var(--line);
+  font-size:11px;color:var(--muted);
+}
+.pyq-foot strong{color:var(--ink-2);font-weight:700;}
+.pyq-actions{
+  display:grid;grid-template-columns:1fr auto;gap:8px;margin-top:12px;
+}
+.pyq-delete-btn{
+  width:38px;height:38px;display:grid;place-items:center;
+  border-radius:var(--r-sm);
+  border:1px solid #F8D5D5;background:var(--danger-soft);color:var(--danger-ink);
+  cursor:pointer;transition:.18s var(--ease);
+}
+.pyq-delete-btn:hover{background:#FDE1E1;}
+
+/* Dustbin button on attendance cards */
+.lecture-dismiss{
+  position:absolute;top:10px;right:10px;
+  width:32px;height:32px;border-radius:50%;
+  background:var(--surface);border:1px solid var(--line);
+  color:var(--muted);font-size:15px;
+  display:grid;place-items:center;cursor:pointer;
+  transition:.18s var(--ease);z-index:2;
+}
+.lecture-dismiss:hover{
+  background:var(--danger-soft);border-color:#F8D5D5;color:var(--danger-ink);
+}
+.lecture{position:relative;padding-right:52px;}
 </style>
 </head>
 
@@ -1673,6 +1750,10 @@ body[data-role="worker"] #membersPage{display:none !important;}
         <span class="nav-icon">👥</span><span class="nav-label">Members</span>
       </button>
 
+      <button class="nav-btn" type="button" data-page="pyq" data-roles="student,professor,control,principal" title="PYQ library">
+        <span class="nav-icon">📚</span><span class="nav-label">PYQ library</span>
+      </button>
+
       <button class="nav-btn" type="button" data-page="control" data-roles="control" title="Control panel">
         <span class="nav-icon">🏫</span><span class="nav-label">Control panel</span>
       </button>
@@ -1855,6 +1936,96 @@ body[data-role="worker"] #membersPage{display:none !important;}
           <button class="btn btn-primary btn-block" type="submit">Submit issue →</button>
           <p class="form-note">A ticket ID is created instantly and shown on your dashboard.</p>
         </form>
+      </section>
+
+            <!-- ================= PYQ ================= -->
+      <section class="page" id="pyqPage">
+        <header class="page-head">
+          <span class="eyebrow">Past Year Questions</span>
+          <h1>PYQ library</h1>
+          <p>Browse and download past year question papers. Professors, Control Department, and Admin can upload.</p>
+        </header>
+
+        <!-- Upload form (visible only for professor / control / principal) -->
+        <section class="card hidden" id="pyqUploadCard">
+          <div class="card-head">
+            <div>
+              <h2>Upload a PYQ</h2>
+              <p>PDF only. Max 4 MB per file.</p>
+            </div>
+          </div>
+
+          <form id="pyqForm" novalidate>
+            <div class="field">
+              <label for="pyqTitle">Title *</label>
+              <input id="pyqTitle" type="text" maxlength="120" placeholder="e.g. Data Structures — End Semester 2024" required>
+            </div>
+
+            <div class="form-row-2">
+              <div class="field">
+                <label for="pyqSubject">Subject</label>
+                <input id="pyqSubject" type="text" maxlength="80" placeholder="e.g. Data Structures">
+              </div>
+              <div class="field">
+                <label for="pyqBranch">Branch *</label>
+                <select id="pyqBranch"></select>
+              </div>
+            </div>
+
+            <div class="form-row-2">
+              <div class="field">
+                <label for="pyqYear">Year *</label>
+                <select id="pyqYear"></select>
+              </div>
+              <div class="field">
+                <label for="pyqSemester">Semester</label>
+                <select id="pyqSemester"></select>
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="pyqDescription">Description</label>
+              <textarea id="pyqDescription" rows="2" maxlength="200" placeholder="Optional notes about this paper..."></textarea>
+            </div>
+
+            <div class="field">
+              <label for="pyqFile">PDF file *</label>
+              <input id="pyqFile" type="file" accept="application/pdf" required>
+              <small class="field-help">Max 4 MB.</small>
+            </div>
+
+            <button class="btn btn-primary btn-block" type="submit" id="pyqSubmitBtn">Upload PYQ</button>
+          </form>
+        </section>
+
+        <!-- Filters -->
+        <section class="card">
+          <div class="card-head">
+            <div>
+              <h2>Available papers</h2>
+              <p>Filter by branch, year or semester.</p>
+            </div>
+            <span class="live-chip" id="pyqCount">0 papers</span>
+          </div>
+
+          <div class="form-row-2" style="margin-bottom:16px">
+            <div class="field" style="margin:0">
+              <label for="pyqFilterBranch">Branch</label>
+              <select id="pyqFilterBranch">
+                <option value="">All branches</option>
+              </select>
+            </div>
+            <div class="field" style="margin:0">
+              <label for="pyqFilterYear">Year</label>
+              <select id="pyqFilterYear">
+                <option value="">All years</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="pyq-grid" id="pyqList"></div>
+          <p class="empty" id="pyqEmpty">No PYQs available yet.</p>
+        </section>
       </section>
 
       <!-- ================= MEMBERS ================= -->
@@ -2408,7 +2579,7 @@ body[data-role="worker"] #membersPage{display:none !important;}
 /* ------------------------------------------------------------
    API CONFIG
    ------------------------------------------------------------ */
-const API_BASE = "http://localhost:4000";   // ← change this after deploying
+const API_BASE = "https://fixpoint-api-je6a.onrender.com";   // ← change this after deploying
 /* ------------------------------------------------------------
    1 · DATA CONSTANTS
    ------------------------------------------------------------ */
@@ -2458,19 +2629,11 @@ const CATEGORIES = {
 };
 
 const ROLE_INFO = {
-  student:   { label: "Student",            icon: "🎓", pages: ["dashboard", "issue", "members"] },
-  professor: { label: "Professor",          icon: "👨‍🏫", pages: ["dashboard", "professor"] },
-  control:   { label: "Control Department", icon: "🏫", pages: ["dashboard", "control"] },
+  student:   { label: "Student",            icon: "🎓", pages: ["dashboard", "issue", "members", "pyq"] },
+  professor: { label: "Professor",          icon: "👨‍🏫", pages: ["dashboard", "professor", "pyq"] },
+  control:   { label: "Control Department", icon: "🏫", pages: ["dashboard", "control", "pyq"] },
   worker:    { label: "Worker",             icon: "🧰", pages: ["dashboard", "worker"] },
-  principal: { label: "Admin",              icon: "👑", pages: ["dashboard", "admin"] }
-};
-
-const DEFAULT_ROLE_ACCESS_IDS = {
-  student: "STUDENT-2026",
-  professor: "PROFESSOR-2026",
-  control: "CONTROL-2026",
-  worker: "WORKER-2026",
-  principal: "PRINCIPAL-2026"
+  principal: { label: "Admin",              icon: "👑", pages: ["dashboard", "pyq", "admin"] }
 };
 
 const DEMO_STUDENT_PROFILES = [];
@@ -2503,6 +2666,7 @@ let selectedBranch = "IT";
 let selectedYear = null;
 let selectedSemester = null;
 let showAcademicSelector = false;
+let hiddenLectures = readRawJSON("fixpointHiddenLecturesV1", []);
 
 /* ------------------------------------------------------------
    3 · STORAGE PRIMITIVES
@@ -3570,73 +3734,51 @@ $("#roleSignupForm")?.addEventListener("submit", async (event) => {
     return;
   }
 
-  if (!(await validRoleId(loginRole, roleId))) {
-  toast(`Invalid ${escapeHTML(ROLE_INFO[loginRole].label)} access ID.`);
-  return;
-}
-
-  const normalizedPhone = normalizeAccountPhone(phone);
-  const key = accountIdentityKey(loginRole, phone);
+    const normalizedPhone = normalizeAccountPhone(phone);
 
   if (!normalizedPhone) {
     toast("Please enter a valid phone number.");
     return;
   }
 
-  if (isAccountDeleted(loginRole, phone)) {
-    toast("This role + phone account was removed by the Admin. Contact the Admin to restore access.");
-    return;
-  }
-
-  if (registeredAccounts[key]) {
-    toast("An account with this role and phone already exists. Use Log In instead.");
-    setAuthMode("login", {
-      name,
-      phone,
-      fatherName: loginRole === "student" ? fatherName : ""
+  // Create the account on the backend
+  let signupResponse;
+  try {
+    signupResponse = await fetch(`${API_BASE}/api/auth/signup`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        collegeId: activeCollegeId,
+        role: loginRole,
+        name,
+        fatherName: loginRole === "student" ? fatherName : "",
+        phone: normalizedPhone,
+        branch,
+        year,
+        department,
+        designation,
+        roleAccessId: roleId
+      })
     });
+  } catch {
+    toast("Cannot reach the server. Is the backend running?");
     return;
   }
 
-  const account = {
-    key,
-    role: loginRole,
-    name,
-    fatherName: loginRole === "student" ? fatherName : "",
-    phone,
-    collegeId: activeCollegeId,
-    branch,
-    year,
-    department,
-    designation,
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-    source: "signup"
-  };
+  const signupData = await signupResponse.json().catch(() => ({}));
 
-  registeredAccounts[key] = account;
-
-  if (loginRole === "student") {
-    const profileKey = studentProfileKeyFrom(name, phone);
-
-    savedStudentProfiles[profileKey] = {
-      ...(savedStudentProfiles[profileKey] || {}),
-      profileId: profileKey,
-      name,
-      fatherName,
-      title: "B.Tech Student",
-      branch: branch || "IT",
-      year: year || "Year 1",
-      bio: savedStudentProfiles[profileKey]?.bio || "No bio added yet.",
-      line: savedStudentProfiles[profileKey]?.line || "Keep learning. Keep building."
-    };
-
-    saveStudentProfiles();
+  if (!signupResponse.ok) {
+    toast(signupData.error || "Signup failed.");
+    return;
   }
 
-  saveAccountState();
-  renderStudentDirectory();
-  renderFacultyDirectory();
+  // Cache locally so the login form can prefill
+  registerAccount({
+    ...signupData.account,
+    key: accountIdentityKey(loginRole, normalizedPhone),
+    collegeId: activeCollegeId,
+    source: "signup"
+  });
 
   setAuthMode("login", {
     name,
@@ -3653,7 +3795,7 @@ $("#roleSignupForm")?.addEventListener("submit", async (event) => {
 /* ------------------------------------------------------------
    16 · LOGIN (standard roles only)
    ------------------------------------------------------------ */
-$("#roleLoginForm")?.addEventListener("submit", (event) => {
+$("#roleLoginForm")?.addEventListener("submit", async (event) => {
   event.preventDefault();
 
   if (!loginRole) return;
@@ -3679,51 +3821,62 @@ $("#roleLoginForm")?.addEventListener("submit", (event) => {
     return;
   }
 
-  if (!validRoleId(loginRole, id)) {
-    toast(`Invalid ${escapeHTML(ROLE_INFO[loginRole].label)} access ID.`);
+    // Log in on the backend
+  let loginResponse;
+  try {
+    loginResponse = await fetch(`${API_BASE}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        collegeId: activeCollegeId,
+        role: loginRole,
+        name,
+        fatherName: loginRole === "student" ? fatherName : "",
+        phone,
+        roleAccessId: id
+      })
+    });
+  } catch {
+    toast("Cannot reach the server. Is the backend running?");
     return;
   }
 
-  if (isAccountDeleted(loginRole, phone)) {
-    toast("This account has been removed by the Admin. Contact the Admin to restore access.");
+  const loginData = await loginResponse.json().catch(() => ({}));
+
+  if (!loginResponse.ok) {
+    toast(loginData.error || "Login failed.");
     return;
   }
 
-  const key = accountIdentityKey(loginRole, phone);
-  const account = registeredAccounts[key];
+  const account = loginData.account;
 
-  if (!account) {
-    toast("No registered account was found for this role and phone in this college. Please sign up first.");
-    return;
-  }
-
-  if (String(account.name || "").trim().toLowerCase() !== name.toLowerCase()) {
-    toast("The entered name does not match the registered account.");
-    return;
-  }
-
-  if (
-    loginRole === "student" &&
-    String(account.fatherName || "").trim().toLowerCase() !== fatherName.toLowerCase()
-  ) {
-    toast("The entered father's name does not match the registered student account.");
-    return;
-  }
-
+  // Keep session.id as the legacy access ID for now (used for ticket ownership).
+  // Also store accountId (UUID) for future backend migrations.
   session = {
-    id: id.toUpperCase(),
+    id: id.toUpperCase(),                      // legacy — role access ID
+    accountId: account.id,                     // new — backend UUID
+    token: loginData.token,
     name: account.name,
-    fatherName: loginRole === "student" ? account.fatherName || "" : "",
+    fatherName: account.father_name || "",
     phone: account.phone,
-    role: loginRole,
+    role: account.role,
     collegeId: activeCollegeId,
     department: account.department || "",
     branch: account.branch || "",
     designation: account.designation || "",
+    year: account.year || "",
     loggedInAt: Date.now()
   };
 
   saveSession();
+
+  // Also cache the account locally (for directories etc. until Stage 5)
+  registerAccount({
+    ...account,
+    key: accountIdentityKey(account.role, account.phone),
+    collegeId: activeCollegeId,
+    source: "registered"
+  });
 
   loginRole = null;
   authMode = "signup";
@@ -3739,7 +3892,7 @@ $("#roleLoginForm")?.addEventListener("submit", (event) => {
 /* ------------------------------------------------------------
    17 · ROUTING
    ------------------------------------------------------------ */
-const PAGES = ["dashboard", "issue", "members", "control", "professor", "worker", "data", "admin"];
+const PAGES = ["dashboard", "issue", "members", "pyq", "control", "professor", "worker", "data", "admin"];
 
 function setPage(pageName) {
   const requested = PAGES.includes(pageName) ? pageName : "dashboard";
@@ -4427,7 +4580,8 @@ function renderAttendanceDashboard() {
     (lecture) =>
       lecture.branch === selectedBranch &&
       lecture.year === selectedYear &&
-      lecture.semester === selectedSemester
+      lecture.semester === selectedSemester &&
+      !hiddenLectures.includes(lecture.id)   // ← hide dismissed lectures
   );
 
   list.innerHTML = matching.map(renderDashboardLectureCard).join("");
@@ -4451,8 +4605,16 @@ function renderDashboardLectureCard(lecture) {
        </span>`
     : "";
 
-  return `
+    return `
     <article class="lecture ${attendance || ""}">
+      <button
+        class="lecture-dismiss"
+        type="button"
+        title="Remove from my view"
+        aria-label="Remove this lecture from my view"
+        data-dismiss-lecture="${escapeHTML(lecture.id)}"
+      >🗑</button>
+
       <div class="lecture-top">
         <span class="lecture-id">${escapeHTML(lecture.type)}</span>
         <span class="lecture-date">${escapeHTML(formatShortDate(lecture.date))}</span>
@@ -4473,6 +4635,23 @@ function renderDashboardLectureCard(lecture) {
     </article>
   `;
 }
+
+// Handle dustbin clicks on attendance cards
+$("#attendanceList")?.addEventListener("click", (event) => {
+  const btn = event.target.closest("[data-dismiss-lecture]");
+  if (!btn) return;
+
+  const lectureId = btn.dataset.dismissLecture;
+  if (!lectureId) return;
+
+  if (hiddenLectures.includes(lectureId)) return;
+
+  hiddenLectures.push(lectureId);
+  writeRawJSON("fixpointHiddenLecturesV1", hiddenLectures);
+
+  renderAttendanceDashboard();
+  toast("Lecture removed from your view on this device.");
+});
 
 $("#branchScroller")?.addEventListener("click", (event) => {
   const button = event.target.closest("[data-branch]");
@@ -4944,7 +5123,330 @@ function removeLegacyDemoStudentProfiles() {
 }
 
 removeLegacyDemoStudentProfiles();
+/* ------------------------------------------------------------
+   26B · PYQ LIBRARY
+   ------------------------------------------------------------ */
+function canManagePyqs() {
+  return session && ["professor", "control", "principal"].includes(session.role);
+}
 
+function populatePyqSelects() {
+  const branchOptions = BRANCHES
+    .map((b) => `<option value="${escapeHTML(b.code)}">${escapeHTML(b.code)} — ${escapeHTML(b.label)}</option>`)
+    .join("");
+
+  const yearOptions = Object.keys(YEAR_DATA)
+    .map((y) => `<option value="${y}">Year ${y}</option>`)
+    .join("");
+
+  const semOptions = Object.values(YEAR_DATA)
+    .flat()
+    .map((s) => `<option value="${escapeHTML(s)}">${escapeHTML(s)}</option>`)
+    .join("");
+
+  const pyqBranch = $("#pyqBranch");
+  if (pyqBranch && !pyqBranch.options.length) pyqBranch.innerHTML = branchOptions;
+
+  const pyqYear = $("#pyqYear");
+  if (pyqYear && !pyqYear.options.length) pyqYear.innerHTML = yearOptions;
+
+  const pyqSem = $("#pyqSemester");
+  if (pyqSem && !pyqSem.options.length) pyqSem.innerHTML = `<option value="">— None —</option>${semOptions}`;
+
+  const filterBranch = $("#pyqFilterBranch");
+  if (filterBranch && filterBranch.options.length <= 1) {
+    filterBranch.innerHTML = `<option value="">All branches</option>${branchOptions}`;
+  }
+
+  const filterYear = $("#pyqFilterYear");
+  if (filterYear && filterYear.options.length <= 1) {
+    filterYear.innerHTML = `<option value="">All years</option>${yearOptions}`;
+  }
+}
+
+function renderPyqPage() {
+  const uploadCard = $("#pyqUploadCard");
+  if (uploadCard) {
+    uploadCard.classList.toggle("hidden", !canManagePyqs());
+  }
+
+  populatePyqSelects();
+
+  // Populate form selects if empty
+  const filterBranch = $("#pyqFilterBranch");
+  const filterYear = $("#pyqFilterYear");
+  if (filterBranch && !filterBranch.value && filterBranch.options.length > 0) filterBranch.value = "";
+  if (filterYear && !filterYear.value && filterYear.options.length > 0) filterYear.value = "";
+
+  loadPyqs();
+}
+
+async function loadPyqs() {
+  const list = $("#pyqList");
+  const empty = $("#pyqEmpty");
+  if (!list) return;
+
+  if (!session || !session.token) {
+    list.innerHTML = "";
+    if (empty) {
+      empty.textContent = session ? "PYQ library requires a fresh login. Please log out and log back in." : "Please log in to view PYQs.";
+      empty.style.display = "block";
+    }
+    return;
+  }
+
+  const branch = $("#pyqFilterBranch")?.value || "";
+  const year = $("#pyqFilterYear")?.value || "";
+
+  const params = new URLSearchParams();
+  if (branch) params.set("branch", branch);
+  if (year) params.set("year", year);
+
+  let response;
+  try {
+    response = await fetch(`${API_BASE}/api/pyqs?${params.toString()}`, {
+      headers: { "Authorization": `Bearer ${session.token}` }
+    });
+  } catch {
+    list.innerHTML = "";
+    if (empty) {
+      empty.textContent = "Cannot reach the server.";
+      empty.style.display = "block";
+    }
+    return;
+  }
+
+  if (!response.ok) {
+    list.innerHTML = "";
+    if (empty) {
+      empty.textContent = "Could not load PYQs.";
+      empty.style.display = "block";
+    }
+    return;
+  }
+
+  const data = await response.json();
+  const pyqs = data.pyqs || [];
+
+  const countEl = $("#pyqCount");
+  if (countEl) countEl.textContent = `${pyqs.length} paper${pyqs.length === 1 ? "" : "s"}`;
+
+  list.innerHTML = pyqs.map((p) => {
+    const canDelete =
+      session.role === "principal" ||
+      (p.uploaded_by_phone && session.phone && p.uploaded_by_phone === session.phone);
+
+    const sizeKb = p.file_size ? Math.round(p.file_size / 1024) : 0;
+    const uploadedBy = p.uploaded_by_name || "Unknown";
+    const roleShort = p.uploaded_by_role ? p.uploaded_by_role.toUpperCase() : "";
+
+    return `
+      <article class="pyq-card">
+        <div class="pyq-card-head">
+          <span class="pyq-icon">📄</span>
+          <div style="min-width:0;flex:1">
+            <h3>${escapeHTML(p.title)}</h3>
+            <small>${escapeHTML(p.subject || "—")}</small>
+          </div>
+        </div>
+
+        <div class="pyq-meta">
+          <span class="pyq-tag">${escapeHTML(p.branch)}</span>
+          <span class="pyq-tag">Year ${p.year}</span>
+          ${p.semester ? `<span class="pyq-tag">${escapeHTML(p.semester)}</span>` : ""}
+        </div>
+
+        ${p.description ? `<p class="pyq-desc">${escapeHTML(p.description)}</p>` : ""}
+
+        <div class="pyq-foot">
+          <strong>${escapeHTML(uploadedBy)}</strong>
+          ${roleShort ? `· ${escapeHTML(roleShort)}` : ""}
+          · ${sizeKb} KB
+        </div>
+
+        <div class="pyq-actions">
+          <button
+            class="btn btn-primary btn-sm"
+            type="button"
+            data-pyq-download="${escapeHTML(p.id)}"
+            data-pyq-name="${escapeHTML(p.file_name)}"
+          >📥 Download PDF</button>
+
+          ${canDelete ? `
+            <button
+              class="pyq-delete-btn"
+              type="button"
+              title="Delete this PYQ"
+              data-pyq-delete="${escapeHTML(p.id)}"
+            >🗑</button>
+          ` : ""}
+        </div>
+      </article>
+    `;
+  }).join("");
+
+  if (empty) empty.style.display = pyqs.length ? "none" : "block";
+}
+
+async function handlePyqDownload(id, fileName) {
+  if (!session?.token) {
+    toast("Please log in again to download.");
+    return;
+  }
+
+  try {
+    const res = await fetch(`${API_BASE}/api/pyqs/${id}`, {
+      headers: { "Authorization": `Bearer ${session.token}` }
+    });
+    if (!res.ok) {
+      toast("Could not fetch PDF.");
+      return;
+    }
+    const data = await res.json();
+
+    // Convert base64 → blob → download
+    const binary = atob(data.file_data);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    const blob = new Blob([bytes], { type: "application/pdf" });
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName || data.file_name || "pyq.pdf";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch {
+    toast("Download failed.");
+  }
+}
+
+async function handlePyqDelete(id) {
+  if (!session?.token) return;
+  if (!window.confirm("Delete this PYQ permanently?")) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/pyqs/${id}`, {
+      method: "DELETE",
+      headers: { "Authorization": `Bearer ${session.token}` }
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      toast(data.error || "Could not delete.");
+      return;
+    }
+    toast("PYQ deleted.");
+    loadPyqs();
+  } catch {
+    toast("Cannot reach the server.");
+  }
+}
+
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || "");
+      const idx = result.indexOf(",");
+      resolve(idx >= 0 ? result.slice(idx + 1) : result);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+$("#pyqForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+
+  if (!canManagePyqs()) {
+    toast("Only faculty can upload PYQs.");
+    return;
+  }
+
+  if (!session?.token) {
+    toast("Please log out and log back in.");
+    return;
+  }
+
+  const title = $("#pyqTitle").value.trim();
+  const subject = $("#pyqSubject").value.trim();
+  const branch = $("#pyqBranch").value;
+  const year = $("#pyqYear").value;
+  const semester = $("#pyqSemester").value;
+  const description = $("#pyqDescription").value.trim();
+  const file = $("#pyqFile").files[0];
+
+  if (!title || !branch || !year || !file) {
+    toast("Title, branch, year and a PDF file are required.");
+    return;
+  }
+
+  if (file.type !== "application/pdf") {
+    toast("Only PDF files are allowed.");
+    return;
+  }
+
+  if (file.size > 4 * 1024 * 1024) {
+    toast("PDF is too large. Max 4 MB.");
+    return;
+  }
+
+  const btn = $("#pyqSubmitBtn");
+  if (btn) { btn.disabled = true; btn.textContent = "Uploading…"; }
+
+  try {
+    const fileData = await readFileAsBase64(file);
+
+    const res = await fetch(`${API_BASE}/api/pyqs`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${session.token}`
+      },
+      body: JSON.stringify({
+        title, subject, branch,
+        year: Number(year),
+        semester, description,
+        fileData,
+        fileName: file.name
+      })
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      toast(data.error || "Could not upload.");
+      return;
+    }
+
+    toast("✅ PYQ uploaded.");
+    event.target.reset();
+    populatePyqSelects();
+    loadPyqs();
+  } catch {
+    toast("Upload failed.");
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "Upload PYQ"; }
+  }
+});
+
+$("#pyqList")?.addEventListener("click", (event) => {
+  const dl = event.target.closest("[data-pyq-download]");
+  if (dl) {
+    handlePyqDownload(dl.dataset.pyqDownload, dl.dataset.pyqName);
+    return;
+  }
+  const del = event.target.closest("[data-pyq-delete]");
+  if (del) {
+    handlePyqDelete(del.dataset.pyqDelete);
+    return;
+  }
+});
+
+$("#pyqFilterBranch")?.addEventListener("change", loadPyqs);
+$("#pyqFilterYear")?.addEventListener("change", loadPyqs);
 /* ------------------------------------------------------------
    27 · ADMIN PANEL
    ------------------------------------------------------------ */
@@ -5619,10 +6121,10 @@ function renderAll() {
 
   renderMyStudentProfile();
   renderStudentDirectory();
+  renderPyqPage();          // ← ADD THIS
   updateSidebarUser();
   refreshMobileMenu();
 }
-
 /* ------------------------------------------------------------
    30 · MOBILE DRAWER
    ------------------------------------------------------------ */
@@ -5630,6 +6132,7 @@ const MOBILE_MENU_META = {
   dashboard: { label: "Dashboard", icon: "⌂" },
   issue:     { label: "Raise issue", icon: "＋" },
   members:   { label: "Students & members", icon: "👥" },
+  pyq:       { label: "PYQ library", icon: "📚" },
   control:   { label: "Control panel", icon: "🏫" },
   professor: { label: "Professor panel", icon: "🎓" },
   worker:    { label: "Worker panel", icon: "🧰" },
@@ -5747,17 +6250,16 @@ window.addEventListener("hashchange", () => {
    ------------------------------------------------------------ */
 populateAcademicOptions();
 populateSignupOptions();
+populatePyqSelects();
 
 if (session) {
   if (
     !activeCollegeId ||
     session.collegeId !== activeCollegeId ||
-    isAccountDeleted(session.role, session.phone)
+    !session.token
   ) {
     session = null;
     saveSession();
-  } else {
-    registerAccount(session);
   }
 }
 
